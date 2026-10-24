@@ -115,12 +115,13 @@ class AbstractGame(ABC):
 
 class SimpleGame(AbstractGame):
     """
-    Игра: хранит кошелёк и сумки с едой и лекарствами,
-    передаёт действия игрока питомцу и следит, не закончилась ли игра.
+    Игра: кошелёк, сумки с едой и лекарствами и ход времени
 
-    Что купить и чем кормить, игра выбирает сама:
-    покупается самая сытная еда, на которую хватает монет,
-    а кормят самой сытной едой из сумки.
+    Передаёт действия игрока питомцу и следит, не закончилась ли игра.
+    Каждое действие занимает один тик времени (час жизни питомца).
+    Что купить и чем кормить, игра выбирает сама: покупается первый
+    товар магазина, на который хватает монет, а кормят и лечат тем,
+    что лежит в сумке первым.
     """
 
     def __init__(
@@ -160,57 +161,53 @@ class SimpleGame(AbstractGame):
 
     def work(self) -> int:
         """
-        Идёт на работу: кликер приносит монеты в кошелёк.
-        Время (update питомца) здесь не идёт, это делает вызывающий код
+        Идёт на работу: кликер приносит монеты, проходит тик времени
 
         :return: количество заработанных монет
-        :raises TamagochiIsGone: если игра уже окончена
+        :raises TamagochiIsGone: если игра окончена до или после работы
         """
         self._check_game_over()
         self._clicker.click()
         income = self._clicker.income_per_click
         self._coins += income
+        self._next_turn()
         return income
 
     def buy_food(self) -> None:
         """
-        Покупает самую сытную еду, на которую хватает монет.
-        Из одинаково сытной выбирается более дешёвая
+        Покупает первую еду из магазина, на которую хватает монет
 
-        :raises TamagochiIsGone: если игра уже окончена
-        :raises NotEnoughMoney: если монет не хватает даже на самую
-            дешёвую еду
+        Поход в магазин занимает тик времени.
+
+        :raises TamagochiIsGone: если игра окончена до или после покупки
+        :raises NotEnoughMoney: если монет не хватает ни на какую еду
         """
         self._check_game_over()
-        cheapest_price = min(food.price for food in self._all_food)
-        self._check_money(cheapest_price)
-        affordable_food = [
-            food for food in self._all_food if food.price <= self._coins
-        ]
-        food = max(
-            affordable_food, key=lambda item: (item.satiety, -item.price)
-        )
+        food = self._first_affordable(self._all_food, 'еда')
         self._coins -= food.price
         self._food_bag.append(food)
+        self._next_turn()
 
     def buy_medicine(self) -> None:
         """
-        Покупает самое дешёвое лекарство. В сумку кладётся новая
-        упаковка, поэтому образец из магазина не расходуется
+        Покупает первое лекарство из магазина, на которое хватает монет
 
-        :raises TamagochiIsGone: если игра уже окончена
-        :raises NotEnoughMoney: если монет не хватает на лекарство
+        В сумку кладётся новая упаковка, поэтому образец из магазина
+        не расходуется. Поход в магазин занимает тик времени.
+
+        :raises TamagochiIsGone: если игра окончена до или после покупки
+        :raises NotEnoughMoney: если монет не хватает ни на какое
+            лекарство
         """
         self._check_game_over()
-        medicine = min(self._all_medicine, key=lambda item: item.price)
-        self._check_money(medicine.price)
+        medicine = self._first_affordable(self._all_medicine, 'лекарство')
         self._coins -= medicine.price
         self._medicine_bag.append(replace(medicine, uses=0))
+        self._next_turn()
 
     def feed_tamagochi(self) -> None:
         """
-        Кормит питомца самой сытной едой из сумки, после чего
-        проходит тик времени
+        Кормит питомца первой едой из сумки, проходит тик времени
 
         :raises TamagochiIsGone: если игра окончена до или после кормления
         :raises EmptyBag: если в сумке нет еды
@@ -218,15 +215,15 @@ class SimpleGame(AbstractGame):
         self._check_game_over()
         if not self._food_bag:
             raise EmptyBag('Сумка с едой пуста, сначала купите еду')
-        food = max(self._food_bag, key=lambda item: item.satiety)
-        self._food_bag.remove(food)
-        self._tamagochi.feed(food)
+        self._tamagochi.feed(self._food_bag.pop(0))
         self._next_turn()
 
     def heal_tamagochi(self) -> None:
         """
-        Даёт питомцу лекарство из сумки, после чего проходит тик
-        времени. Закончившееся лекарство выбрасывается из сумки
+        Лечит питомца первым лекарством из сумки, проходит тик времени
+
+        Питомец тратит одну дозу. Закончившееся лекарство
+        выбрасывается из сумки.
 
         :raises TamagochiIsGone: если игра окончена до или после лечения
         :raises EmptyBag: если в сумке нет лекарств
@@ -238,14 +235,13 @@ class SimpleGame(AbstractGame):
             )
         medicine = self._medicine_bag[0]
         self._tamagochi.heal(medicine)
-        medicine.uses += 1
         if medicine.is_empty():
             self._medicine_bag.pop(0)
         self._next_turn()
 
     def rest_tamagochi(self) -> None:
         """
-        Укладывает питомца отдыхать, после чего проходит тик времени
+        Укладывает питомца отдыхать, проходит тик времени
 
         :raises TamagochiIsGone: если игра окончена до или после отдыха
         """
@@ -255,7 +251,7 @@ class SimpleGame(AbstractGame):
 
     def play_with_tamagochi(self) -> None:
         """
-        Играет с питомцем, после чего проходит тик времени
+        Играет с питомцем, проходит тик времени
 
         :raises TamagochiIsGone: если игра окончена до или после игры
         """
@@ -268,9 +264,7 @@ class SimpleGame(AbstractGame):
         Собирает статус игры: показатели питомца и монеты
 
         :return: словарь с показателями питомца и ключом coins
-        :raises TamagochiIsGone: если питомец погиб и игра окончена
         """
-        self._check_game_over()
         return {**self._tamagochi.status, 'coins': self._coins}
 
     @property
@@ -291,6 +285,26 @@ class SimpleGame(AbstractGame):
         """
         return list(self._medicine_bag)
 
+    def _first_affordable(
+        self, goods: list[Food] | list[Medicine], title: str
+    ) -> Food | Medicine:
+        """
+        Находит первый товар магазина, на который хватает монет
+
+        :param goods: товары магазина (еда или лекарства)
+        :param title: как назвать товар в сообщении об ошибке
+        :return: товар, который можно купить
+        :raises NotEnoughMoney: если монет не хватает ни на один товар
+        """
+        for item in goods:
+            if item.price <= self._coins:
+                return item
+        cheapest = min(item.price for item in goods)
+        raise NotEnoughMoney(
+            f'Не хватает монет: {title} стоит от {cheapest}, '
+            f'у вас {self._coins}'
+        )
+
     def _next_turn(self) -> None:
         """
         Проводит тик времени для питомца и проверяет конец игры
@@ -299,18 +313,6 @@ class SimpleGame(AbstractGame):
         """
         self._tamagochi.update()
         self._check_game_over()
-
-    def _check_money(self, price: int) -> None:
-        """
-        Проверяет, хватает ли монет на покупку
-
-        :param price: стоимость покупки
-        :raises NotEnoughMoney: если монет меньше, чем стоимость
-        """
-        if price > self._coins:
-            raise NotEnoughMoney(
-                f'Не хватает монет: нужно {price}, у вас {self._coins}'
-            )
 
     def _check_game_over(self) -> None:
         """

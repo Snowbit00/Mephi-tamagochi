@@ -3,7 +3,7 @@
 import random
 from abc import ABC, abstractmethod
 
-from .exceptions import TamagochiIsGone
+from .exceptions import MedicineIsEmpty
 from .models import Food, Medicine
 
 # Границы показателей (голод, усталость, энергия, здоровье)
@@ -18,7 +18,7 @@ WEAK_THRESHOLD = 70
 WEAK_SICK_CHANCE_FACTOR = 2.5
 
 # Как меняются показатели за один тик
-HUNGER_PER_TICK = 3
+HUNGER_PER_TICK = 2
 FATIGUE_PER_TICK = 2
 SICK_FATIGUE_PER_TICK = 4  # болезнь утомляет сильнее
 ENERGY_PER_TICK = 2
@@ -161,24 +161,23 @@ class SimpleTamagochi(AbstractTamagochi):
 
     def feed(self, food: Food) -> None:
         """
-        Кормит питомца: голод уменьшается на сытность еды,
-        а на переваривание тратится немного энергии
+        Кормит питомца
+
+        Голод уменьшается на сытность еды, а на переваривание
+        тратится немного энергии.
 
         :param food: объект еды для кормления
-        :raises TamagochiIsGone: если питомец уже погиб
         """
-        self._check_alive()
         self._hunger = clamp_stat(self._hunger - food.satiety)
         self._energy = clamp_stat(self._energy - FEED_ENERGY_COST)
 
     def play(self) -> None:
         """
-        Играет с питомцем: тратится энергия, растут усталость и голод.
-        Здоровому питомцу игра поднимает здоровье
+        Играет с питомцем
 
-        :raises TamagochiIsGone: если питомец уже погиб
+        Тратится энергия, растут усталость и голод.
+        Здоровому питомцу игра поднимает здоровье.
         """
-        self._check_alive()
         self._energy = clamp_stat(self._energy - PLAY_ENERGY_COST)
         self._fatigue = clamp_stat(self._fatigue + PLAY_FATIGUE)
         self._hunger = clamp_stat(self._hunger + PLAY_HUNGER)
@@ -187,12 +186,11 @@ class SimpleTamagochi(AbstractTamagochi):
 
     def rest(self) -> None:
         """
-        Укладывает питомца отдыхать: усталость падает, энергия растёт.
-        Больной питомец отдыхает вдвое хуже
+        Укладывает питомца отдыхать
 
-        :raises TamagochiIsGone: если питомец уже погиб
+        Усталость падает, энергия растёт. Больной питомец
+        отдыхает вдвое хуже.
         """
-        self._check_alive()
         divider = SICK_REST_DIVIDER if self._sick else 1
         self._fatigue = clamp_stat(
             self._fatigue - REST_FATIGUE_RECOVERY // divider
@@ -203,17 +201,17 @@ class SimpleTamagochi(AbstractTamagochi):
 
     def heal(self, medicine: Medicine) -> None:
         """
-        Лечит питомца: добавляет здоровье и снимает болезнь.
-        Счётчик применений лекарства здесь не меняется,
-        его ведёт тот, кто хранит лекарство
+        Лечит питомца одной дозой лекарства
+
+        Здоровье растёт на силу лекарства, болезнь проходит,
+        а у лекарства тратится одно применение.
 
         :param medicine: лекарство для лечения
-        :raises TamagochiIsGone: если питомец уже погиб
-        :raises ValueError: если у лекарства не осталось применений
+        :raises MedicineIsEmpty: если у лекарства не осталось применений
         """
-        self._check_alive()
         if medicine.is_empty():
-            raise ValueError(f'Лекарство {medicine.name} закончилось')
+            raise MedicineIsEmpty(f'Лекарство {medicine.name} закончилось')
+        medicine.uses += 1
         self._change_hp(medicine.heal_hp)
         self._sick = False
 
@@ -249,13 +247,13 @@ class SimpleTamagochi(AbstractTamagochi):
 
     def update(self) -> None:
         """
-        Проводит один тик времени: растут голод и усталость,
-        тратится энергия, теряется здоровье от болезни и
-        запущенного состояния, а здоровый питомец может заболеть
+        Проводит один тик времени
 
-        :raises TamagochiIsGone: если питомец уже погиб
+        Растут голод и усталость, тратится энергия, теряется здоровье
+        от болезни и запущенного состояния, а здоровый питомец может
+        заболеть. Погибший питомец не воскресает: здоровье дальше
+        только падает, а конец игры отслеживает игра.
         """
-        self._check_alive()
         fatigue_gain = FATIGUE_PER_TICK
         if self._sick:
             fatigue_gain += SICK_FATIGUE_PER_TICK
@@ -300,12 +298,3 @@ class SimpleTamagochi(AbstractTamagochi):
         :param delta: на сколько изменить здоровье (может быть < 0)
         """
         self._hp = min(MAX_STAT, self._hp + delta)
-
-    def _check_alive(self) -> None:
-        """
-        Не даёт взаимодействовать с погибшим питомцем
-
-        :raises TamagochiIsGone: если питомец погиб
-        """
-        if not self.is_alive():
-            raise TamagochiIsGone(f'Питомец {self._name} погиб')

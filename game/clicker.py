@@ -20,7 +20,11 @@ class AbstractClicker(ABC):
     @property
     @abstractmethod
     def income_per_click(self) -> int:
-        """Абстрактное свойство для доступа к количеству монет за клик"""
+        """
+        Абстрактное свойство для доступа к количеству монет за клик
+
+        :return: количество монет за клик
+        """
         raise NotImplementedError
 
 

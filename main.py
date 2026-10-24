@@ -9,7 +9,21 @@ from game.models import Food, Medicine
 from game.tamagochi import SimpleTamagochi
 
 PET_NAME = 'Мурзик'
+MIN_INCOME = 10  # монет за работу: от MIN_INCOME до MAX_INCOME
+MAX_INCOME = 20
 EXIT_COMMAND = '0'
+
+# Команды меню: номер -> (название, метод игры, сообщение о результате).
+# В сообщение на место {} подставляется то, что вернул метод.
+ACTIONS = {
+    '1': ('Пойти на работу', 'work', 'Вы заработали {} монет'),
+    '2': ('Купить еду', 'buy_food', 'Вы купили еду'),
+    '3': ('Купить лекарство', 'buy_medicine', 'Вы купили лекарство'),
+    '4': ('Покормить', 'feed_tamagochi', 'Вы покормили питомца'),
+    '5': ('Вылечить', 'heal_tamagochi', 'Вы дали питомцу лекарство'),
+    '6': ('Играть', 'play_with_tamagochi', 'Вы поиграли с питомцем'),
+    '7': ('Отдых', 'rest_tamagochi', 'Питомец отдохнул'),
+}
 
 
 def create_game() -> AbstractGame:
@@ -21,15 +35,15 @@ def create_game() -> AbstractGame:
     all_food = [
         Food(name='Бургер', satiety=20, price=40),
         Food(name='Салат', satiety=10, price=20),
-        Food(name='Яблоко', satiety=10, price=15)
+        Food(name='Яблоко', satiety=10, price=15),
     ]
 
     all_medicine = [
-        Medicine(name='Ибупрофен', price=30, heal_hp=20, number_of_uses=2)
+        Medicine(name='Ибупрофен', price=30, heal_hp=20, number_of_uses=2),
     ]
 
     tamagochi = SimpleTamagochi(name=PET_NAME)
-    clicker = SimpleRandomClicker(10, 20)
+    clicker = SimpleRandomClicker(MIN_INCOME, MAX_INCOME)
     return SimpleGame(
         tamagochi, clicker, all_food=all_food, all_medicine=all_medicine
     )
@@ -45,31 +59,25 @@ def print_status(game: AbstractGame) -> None:
     Печатает сумки, показатели питомца и монеты
 
     :param game: текущая игра
-    :raises TamagochiIsGone: если игра окончена
     """
     status = game.get_status()
-    print(f"Сумка с едой: {game.food}")
-    print(f"Сумка с лекарствами: {game.medicine}")
+    print(f'Сумка с едой: {game.food}')
+    print(f'Сумка с лекарствами: {game.medicine}')
     print(
-        f"\nСтатус: голод {status['hunger']}, "
-        f"усталость {status['fatigue']}, здоровье {status['hp']}, "
-        f"энергия {status['energy']}, монет {status['coins']}\n"
+        f'\nСтатус: голод {status["hunger"]}, '
+        f'усталость {status["fatigue"]}, здоровье {status["hp"]}, '
+        f'энергия {status["energy"]}, монет {status["coins"]}\n'
     )
     if game.tamagochi.is_sick():
-        print("=======Тамагочи болеет======")
-        print("=======Отдых действует менее эффективно=======")
+        print('=======Тамагочи болеет======')
+        print('=======Отдых действует менее эффективно=======')
 
 
 def print_menu() -> None:
     """Печатает список действий"""
-    print("1. Пойти на работу")
-    print("2. Купить еду")
-    print("3. Купить лекарство")
-    print("4. Покормить")
-    print("5. Вылечить")
-    print("6. Играть")
-    print("7. Отдых")
-    print(f"{EXIT_COMMAND}. Выход")
+    for command, (title, _, _) in ACTIONS.items():
+        print(f'{command}. {title}')
+    print(f'{EXIT_COMMAND}. Выход')
 
 
 def make_turn(game: AbstractGame, command: str) -> str:
@@ -81,48 +89,28 @@ def make_turn(game: AbstractGame, command: str) -> str:
     :return: сообщение о результате для игрока
     :raises GameError: если действие не удалось (нет денег, еды и т. п.)
     """
-    match command:
-        case "1":
-            income = game.work()
-            game.tamagochi.update()
-            return f'Вы заработали {income} монет'
-        case "2":
-            game.buy_food()
-            return 'Вы купили еду'
-        case "3":
-            game.buy_medicine()
-            return 'Вы купили лекарство'
-        case "4":
-            game.feed_tamagochi()
-            return 'Вы покормили питомца'
-        case "5":
-            game.heal_tamagochi()
-            return 'Вы дали питомцу лекарство'
-        case "6":
-            game.play_with_tamagochi()
-            return 'Вы поиграли с питомцем'
-        case "7":
-            game.rest_tamagochi()
-            return 'Питомец отдохнул'
-        case _:
-            return "Неверная команда"
+    if command not in ACTIONS:
+        return 'Неверная команда'
+    _, method_name, message = ACTIONS[command]
+    result = getattr(game, method_name)()
+    return message.format(result)
 
 
 def main() -> None:
     """Запускает игровой цикл: показать статус, спросить действие"""
     game = create_game()
 
-    print(f"Добро пожаловать в Тамагочи-кликер! Ваш питомец — кот {PET_NAME}")
+    print(f'Добро пожаловать в Тамагочи-кликер! Ваш питомец — кот {PET_NAME}')
     output = ''
 
     while True:
         print(output)
+        print_status(game)
+        print_menu()
+        command = input('Выберите действие: ')
+        if command == EXIT_COMMAND:
+            break
         try:
-            print_status(game)
-            print_menu()
-            command = input("Выберите действие: ")
-            if command == EXIT_COMMAND:
-                break
             output = make_turn(game, command)
         except TamagochiIsGone as error:
             print(error)
@@ -133,5 +121,5 @@ def main() -> None:
         clear_screen()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

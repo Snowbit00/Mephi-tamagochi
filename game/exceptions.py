@@ -15,3 +15,7 @@ class NotEnoughMoney(GameError):
 
 class EmptyBag(GameError):
     """Ошибка когда в сумке нет нужного предмета (еды или лекарства)"""
+
+
+class MedicineIsEmpty(GameError):
+    """Ошибка когда у лекарства не осталось применений"""

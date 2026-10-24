@@ -11,7 +11,11 @@ class Food:
     price: int  # стоимость
 
     def __repr__(self) -> str:
-        """Метод для красивого принтинга объекта"""
+        """
+        Метод для красивого принтинга объекта
+
+        :return: описание объекта для вывода на экран
+        """
         return (
             f'{self.name} стоимость: {self.price}, '
             f'утоляет голод на {self.satiety} единиц'
@@ -36,7 +40,11 @@ class Medicine:
         return self.uses >= self.number_of_uses
 
     def __repr__(self) -> str:
-        """Метод для красивого принтинга объекта"""
+        """
+        Метод для красивого принтинга объекта
+
+        :return: описание объекта для вывода на экран
+        """
         return (
             f'{self.name} стоимость: {self.price}, '
             f'лечит на {self.heal_hp} HP, '

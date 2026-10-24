@@ -2,6 +2,7 @@
 
 import pytest
 
+import game.tamagochi as rules
 from game.clicker import AbstractClicker
 from game.exceptions import EmptyBag, NotEnoughMoney, TamagochiIsGone
 from game.game import AbstractGame, SimpleGame
@@ -39,11 +40,6 @@ def make_game(income: int = 15) -> SimpleGame:
     )
 
 
-def earn(game: SimpleGame, times: int) -> None:
-    for _ in range(times):
-        game.work()
-
-
 def test_game_follows_interface():
     assert isinstance(make_game(), AbstractGame)
 
@@ -65,35 +61,43 @@ def test_new_game_status():
     }
 
 
-def test_work_adds_coins_without_tick():
+def test_work_adds_coins_and_makes_a_tick():
     game = make_game(income=15)
     assert game.work() == 15
-    assert game.work() == 15
     status = game.get_status()
-    assert status['coins'] == 30
-    assert status['hunger'] == 0
+    assert status['coins'] == 15
+    assert status['hunger'] == rules.HUNGER_PER_TICK
 
 
-def test_buy_food_without_money_raises():
+def test_buy_food_without_money_changes_nothing():
     game = make_game(income=10)
     game.work()
+    before = game.get_status()
     with pytest.raises(NotEnoughMoney):
         game.buy_food()
-    assert game.get_status()['coins'] == 10
+    assert game.get_status() == before
     assert game.food == []
 
 
 @pytest.mark.parametrize('coins, expected_food', [
     (15, APPLE),  # хватает только на яблоко
-    (25, APPLE),  # салат и яблоко одинаково сытные, яблоко дешевле
-    (45, BURGER),  # хватает на самое сытное
+    (25, SALAD),  # салат в магазине стоит раньше яблока
+    (45, BURGER),  # хватает на первый товар магазина
 ])
-def test_buy_food_picks_most_filling_affordable(coins, expected_food):
+def test_buy_food_picks_first_affordable(coins, expected_food):
     game = make_game(income=coins)
     game.work()
     game.buy_food()
     assert game.food == [expected_food]
     assert game.get_status()['coins'] == coins - expected_food.price
+
+
+def test_shopping_makes_a_tick():
+    game = make_game(income=100)
+    game.work()
+    game.buy_food()
+    game.buy_medicine()
+    assert game.get_status()['hunger'] == 3 * rules.HUNGER_PER_TICK
 
 
 def test_buy_medicine_without_money_raises():
@@ -120,16 +124,14 @@ def test_feed_with_empty_bag_raises():
         make_game().feed_tamagochi()
 
 
-def test_feed_uses_most_filling_food_and_ticks():
+def test_feed_uses_first_food_and_makes_a_tick():
     game = make_game(income=55)
     game.work()
     game.buy_food()  # бургер за 40
     game.buy_food()  # яблоко за 15
-    game.rest_tamagochi()
-    game.rest_tamagochi()  # голод 6
-    game.feed_tamagochi()
+    game.feed_tamagochi()  # голод 0: бургер съеден, потом тик
     assert game.food == [APPLE]
-    assert game.get_status()['hunger'] == 0 + 3  # съел бургер, потом тик
+    assert game.get_status()['hunger'] == rules.HUNGER_PER_TICK
 
 
 def test_heal_with_empty_bag_raises():
@@ -162,9 +164,10 @@ def test_shop_medicine_is_not_spent():
 def test_play_and_rest_make_a_tick():
     game = make_game()
     game.play_with_tamagochi()
-    assert game.get_status()['hunger'] == 5 + 3
+    hunger = rules.PLAY_HUNGER + rules.HUNGER_PER_TICK
+    assert game.get_status()['hunger'] == hunger
     game.rest_tamagochi()
-    assert game.get_status()['hunger'] == 8 + 3
+    assert game.get_status()['hunger'] == hunger + rules.HUNGER_PER_TICK
 
 
 def test_bags_are_copies():
@@ -177,13 +180,23 @@ def test_bags_are_copies():
     assert game.medicine == []
 
 
-def test_game_ends_when_pet_dies():
+def test_work_alone_ends_the_game():
     game = make_game()
     with pytest.raises(TamagochiIsGone):
-        for _ in range(100):  # без еды питомец погибнет от голода
-            game.rest_tamagochi()
+        for _ in range(300):  # без еды питомец погибнет от голода
+            game.work()
     assert not game.tamagochi.is_alive()
+
+
+def test_after_death_status_works_and_actions_are_blocked():
+    game = make_game()
     with pytest.raises(TamagochiIsGone):
-        game.get_status()
-    with pytest.raises(TamagochiIsGone):
-        game.work()
+        for _ in range(300):
+            game.rest_tamagochi()
+    status = game.get_status()
+    assert status['hp'] < 0
+    for action in (game.work, game.buy_food, game.feed_tamagochi,
+                   game.play_with_tamagochi, game.rest_tamagochi):
+        with pytest.raises(TamagochiIsGone):
+            action()
+    assert game.get_status() == status

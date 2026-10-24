@@ -1,10 +1,17 @@
 """Тесты игры"""
 
+import builtins
+
 import pytest
 
 import game.tamagochi as rules
 from game.clicker import AbstractClicker
-from game.exceptions import EmptyBag, NotEnoughMoney, TamagochiIsGone
+from game.exceptions import (
+    ActionCancelled,
+    EmptyBag,
+    NotEnoughMoney,
+    TamagochiIsGone,
+)
 from game.game import AbstractGame, SimpleGame
 from game.models import Food, Medicine
 from game.tamagochi import SimpleTamagochi
@@ -26,6 +33,18 @@ class FixedClicker(AbstractClicker):
     @property
     def income_per_click(self) -> int:
         return self._income
+
+
+@pytest.fixture(autouse=True)
+def ask(monkeypatch, capsys):
+    """Ответы игрока на вопросы игры; по умолчанию выбирается товар 1"""
+    answers = ['1'] * 20
+
+    def fake_input(prompt=''):
+        return answers.pop(0) if answers else '0'
+
+    monkeypatch.setattr(builtins, 'input', fake_input)
+    return answers
 
 
 def make_game(income: int = 15) -> SimpleGame:
@@ -73,23 +92,34 @@ def test_buy_food_without_money_changes_nothing():
     game = make_game(income=10)
     game.work()
     before = game.get_status()
-    with pytest.raises(NotEnoughMoney):
+    with pytest.raises(NotEnoughMoney):  # выбран бургер за 40
         game.buy_food()
     assert game.get_status() == before
     assert game.food == []
 
 
-@pytest.mark.parametrize('coins, expected_food', [
-    (15, APPLE),  # хватает только на яблоко
-    (25, SALAD),  # салат в магазине стоит раньше яблока
-    (45, BURGER),  # хватает на первый товар магазина
+@pytest.mark.parametrize('choice, expected_food', [
+    ('1', BURGER), ('2', SALAD), ('3', APPLE),
 ])
-def test_buy_food_picks_first_affordable(coins, expected_food):
-    game = make_game(income=coins)
+def test_buy_food_gives_chosen_item(ask, choice, expected_food):
+    ask[:] = [choice]
+    game = make_game(income=100)
     game.work()
     game.buy_food()
     assert game.food == [expected_food]
-    assert game.get_status()['coins'] == coins - expected_food.price
+    assert game.get_status()['coins'] == 100 - expected_food.price
+
+
+@pytest.mark.parametrize('answer', ['0', 'abc', '9', ''])
+def test_cancelled_choice_changes_nothing(ask, answer):
+    game = make_game(income=100)
+    game.work()
+    before = game.get_status()
+    ask[:] = [answer]
+    with pytest.raises(ActionCancelled):
+        game.buy_food()
+    assert game.get_status() == before
+    assert game.food == []
 
 
 def test_shopping_makes_a_tick():
@@ -124,13 +154,14 @@ def test_feed_with_empty_bag_raises():
         make_game().feed_tamagochi()
 
 
-def test_feed_uses_first_food_and_makes_a_tick():
+def test_feed_uses_chosen_food_and_makes_a_tick(ask):
     game = make_game(income=55)
     game.work()
-    game.buy_food()  # бургер за 40
-    game.buy_food()  # яблоко за 15
-    game.feed_tamagochi()  # голод 0: бургер съеден, потом тик
-    assert game.food == [APPLE]
+    ask[:] = ['1', '3', '2']  # купить бургер, купить яблоко, съесть яблоко
+    game.buy_food()
+    game.buy_food()
+    game.feed_tamagochi()
+    assert game.food == [BURGER]
     assert game.get_status()['hunger'] == rules.HUNGER_PER_TICK
 
 
@@ -170,7 +201,8 @@ def test_play_and_rest_make_a_tick():
     assert game.get_status()['hunger'] == hunger + rules.HUNGER_PER_TICK
 
 
-def test_bags_are_copies():
+def test_bags_are_copies(ask):
+    ask[:] = ['3']  # яблоко
     game = make_game(income=15)
     game.work()
     game.buy_food()

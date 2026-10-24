@@ -19,3 +19,7 @@ class EmptyBag(GameError):
 
 class MedicineIsEmpty(GameError):
     """Ошибка когда у лекарства не осталось применений"""
+
+
+class ActionCancelled(GameError):
+    """Ошибка когда игрок отменил выбор предмета"""

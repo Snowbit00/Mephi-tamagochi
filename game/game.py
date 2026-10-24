@@ -5,7 +5,12 @@ from dataclasses import replace
 from typing import Any
 
 from .clicker import AbstractClicker
-from .exceptions import EmptyBag, NotEnoughMoney, TamagochiIsGone
+from .exceptions import (
+    ActionCancelled,
+    EmptyBag,
+    NotEnoughMoney,
+    TamagochiIsGone,
+)
 from .models import Food, Medicine
 from .tamagochi import AbstractTamagochi
 
@@ -119,9 +124,8 @@ class SimpleGame(AbstractGame):
 
     Передаёт действия игрока питомцу и следит, не закончилась ли игра.
     Каждое действие занимает один тик времени (час жизни питомца).
-    Что купить и чем кормить, игра выбирает сама: покупается первый
-    товар магазина, на который хватает монет, а кормят и лечат тем,
-    что лежит в сумке первым.
+    Предмет для покупки, кормления и лечения игрок выбирает из списка
+    по номеру, номер 0 отменяет действие (тик при этом не идёт).
     """
 
     def __init__(
@@ -175,68 +179,79 @@ class SimpleGame(AbstractGame):
 
     def buy_food(self) -> None:
         """
-        Покупает первую еду из магазина, на которую хватает монет
+        Покупает еду из магазина: игрок выбирает её по номеру
 
         Поход в магазин занимает тик времени.
 
         :raises TamagochiIsGone: если игра окончена до или после покупки
-        :raises NotEnoughMoney: если монет не хватает ни на какую еду
+        :raises ActionCancelled: если игрок отменил выбор
+        :raises NotEnoughMoney: если монет не хватает на выбранную еду
         """
         self._check_game_over()
-        food = self._first_affordable(self._all_food, 'еда')
-        self._coins -= food.price
+        food = self._choose('Какую еду купить?', self._all_food)
+        self._pay(food.price)
         self._food_bag.append(food)
         self._next_turn()
 
     def buy_medicine(self) -> None:
         """
-        Покупает первое лекарство из магазина, на которое хватает монет
+        Покупает лекарство из магазина: игрок выбирает его по номеру
 
         В сумку кладётся новая упаковка, поэтому образец из магазина
         не расходуется. Поход в магазин занимает тик времени.
 
         :raises TamagochiIsGone: если игра окончена до или после покупки
-        :raises NotEnoughMoney: если монет не хватает ни на какое
-            лекарство
+        :raises ActionCancelled: если игрок отменил выбор
+        :raises NotEnoughMoney: если монет не хватает на лекарство
         """
         self._check_game_over()
-        medicine = self._first_affordable(self._all_medicine, 'лекарство')
-        self._coins -= medicine.price
+        medicine = self._choose(
+            'Какое лекарство купить?', self._all_medicine
+        )
+        self._pay(medicine.price)
         self._medicine_bag.append(replace(medicine, uses=0))
         self._next_turn()
 
     def feed_tamagochi(self) -> None:
         """
-        Кормит питомца первой едой из сумки, проходит тик времени
+        Кормит питомца едой из сумки: игрок выбирает её по номеру
+
+        Съеденная еда исчезает из сумки, проходит тик времени.
 
         :raises TamagochiIsGone: если игра окончена до или после кормления
         :raises EmptyBag: если в сумке нет еды
+        :raises ActionCancelled: если игрок отменил выбор
         """
         self._check_game_over()
         if not self._food_bag:
             raise EmptyBag('Сумка с едой пуста, сначала купите еду')
-        self._tamagochi.feed(self._food_bag.pop(0))
+        food = self._choose('Чем покормить питомца?', self._food_bag)
+        self._food_bag.remove(food)
+        self._tamagochi.feed(food)
         self._next_turn()
 
     def heal_tamagochi(self) -> None:
         """
-        Лечит питомца первым лекарством из сумки, проходит тик времени
+        Лечит питомца лекарством из сумки: игрок выбирает его по номеру
 
         Питомец тратит одну дозу. Закончившееся лекарство
-        выбрасывается из сумки.
+        выбрасывается из сумки. Проходит тик времени.
 
         :raises TamagochiIsGone: если игра окончена до или после лечения
         :raises EmptyBag: если в сумке нет лекарств
+        :raises ActionCancelled: если игрок отменил выбор
         """
         self._check_game_over()
         if not self._medicine_bag:
             raise EmptyBag(
                 'Сумка с лекарствами пуста, сначала купите лекарство'
             )
-        medicine = self._medicine_bag[0]
+        medicine = self._choose(
+            'Каким лекарством лечить?', self._medicine_bag
+        )
         self._tamagochi.heal(medicine)
         if medicine.is_empty():
-            self._medicine_bag.pop(0)
+            self._remove_by_identity(self._medicine_bag, medicine)
         self._next_turn()
 
     def rest_tamagochi(self) -> None:
@@ -285,25 +300,53 @@ class SimpleGame(AbstractGame):
         """
         return list(self._medicine_bag)
 
-    def _first_affordable(
-        self, goods: list[Food] | list[Medicine], title: str
-    ) -> Food | Medicine:
+    @staticmethod
+    def _choose(title: str, items: list[Any]) -> Any:
         """
-        Находит первый товар магазина, на который хватает монет
+        Показывает пронумерованный список и спрашивает номер предмета
 
-        :param goods: товары магазина (еда или лекарства)
-        :param title: как назвать товар в сообщении об ошибке
-        :return: товар, который можно купить
-        :raises NotEnoughMoney: если монет не хватает ни на один товар
+        :param title: вопрос игроку
+        :param items: предметы на выбор
+        :return: выбранный предмет
+        :raises ActionCancelled: если введён 0, неверный номер
+            или ввод закончился
         """
-        for item in goods:
-            if item.price <= self._coins:
-                return item
-        cheapest = min(item.price for item in goods)
-        raise NotEnoughMoney(
-            f'Не хватает монет: {title} стоит от {cheapest}, '
-            f'у вас {self._coins}'
-        )
+        print(title)
+        for number, item in enumerate(items, start=1):
+            print(f'{number}. {item}')
+        try:
+            answer = input('Введите номер (0 — отмена): ')
+        except EOFError:
+            raise ActionCancelled('Выбор отменён') from None
+        if answer.strip().isdigit() and 1 <= int(answer) <= len(items):
+            return items[int(answer) - 1]
+        raise ActionCancelled('Выбор отменён')
+
+    def _pay(self, price: int) -> None:
+        """
+        Списывает монеты за покупку
+
+        :param price: стоимость покупки
+        :raises NotEnoughMoney: если монет меньше, чем стоимость
+        """
+        if price > self._coins:
+            raise NotEnoughMoney(
+                f'Не хватает монет: нужно {price}, у вас {self._coins}'
+            )
+        self._coins -= price
+
+    @staticmethod
+    def _remove_by_identity(items: list[Any], target: Any) -> None:
+        """
+        Убирает из списка именно этот объект, а не равный ему
+
+        :param items: список предметов
+        :param target: предмет, который нужно убрать
+        """
+        for index, item in enumerate(items):
+            if item is target:
+                del items[index]
+                return
 
     def _next_turn(self) -> None:
         """

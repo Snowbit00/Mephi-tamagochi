@@ -287,18 +287,18 @@ class SimpleGame(AbstractGame):
         """
         Сумка с едой
 
-        :return: копия списка купленной еды
+        :return: список купленной еды (сама сумка, не копия)
         """
-        return list(self._food_bag)
+        return self._food_bag
 
     @property
     def medicine(self) -> list[Medicine]:
         """
         Сумка с лекарствами
 
-        :return: копия списка купленных лекарств
+        :return: список купленных лекарств (сама сумка, не копия)
         """
-        return list(self._medicine_bag)
+        return self._medicine_bag
 
     @staticmethod
     def _choose(title: str, items: list[Any]) -> Any:

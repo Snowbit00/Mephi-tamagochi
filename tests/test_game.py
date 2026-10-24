@@ -201,15 +201,19 @@ def test_play_and_rest_make_a_tick():
     assert game.get_status()['hunger'] == hunger + rules.HUNGER_PER_TICK
 
 
-def test_bags_are_copies(ask):
+def test_bags_are_the_real_inventory(ask):
     ask[:] = ['3']  # яблоко
     game = make_game(income=15)
     game.work()
     game.buy_food()
-    game.food.clear()
-    game.medicine.append(Medicine('Ибупрофен', 30, 20, 2))
     assert game.food == [APPLE]
-    assert game.medicine == []
+    game.food.append(BURGER)  # сумку можно пополнить напрямую
+    ask[:] = ['2', '1']  # съесть бургер, потом лечиться
+    game.feed_tamagochi()
+    assert game.food == [APPLE]
+    game.medicine.append(Medicine('Ибупрофен', 30, 20, 2))
+    game.heal_tamagochi()
+    assert game.medicine[0].uses == 1
 
 
 def test_work_alone_ends_the_game():
